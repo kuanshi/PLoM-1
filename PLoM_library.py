@@ -10,7 +10,8 @@ from ctypes import *
 import os
 from general import Logfile, DBServer
 from multiprocessing import Pool
-import defs
+# KZ: comment defs
+# import defs
 
 from sys import platform
 if platform == "linux" or platform == "linux2":
@@ -77,7 +78,8 @@ def K(eta, epsilon):
     pool = Pool(num_cpu)
     N = eta.shape[1]
     # use functions in defs.py
-    results = pool.map(defs.splat_f, ((i, j, eta, epsilon) for i in range(N) for j in range(N)))
+    # KZ: moving defs function inside here
+    results = pool.map(splat_f, ((i, j, eta, epsilon) for i in range(N) for j in range(N)))
     K = np.array(results).reshape(N, N)
     b = np.diag(np.sum(K,1))
     return K, b
@@ -341,7 +343,8 @@ def L(y, g_c, x_mean, eta, s_v, hat_s_v, mu, phi, psi, lambda_i, D_x_g_c): #grad
         import multiprocessing
         num_cpu = multiprocessing.cpu_count()
         pool = Pool(num_cpu)
-        results = pool.map(defs.splat_h, ((l, y, x_mean, eta, s_v, hat_s_v, mu, phi, psi, lambda_i, D_x_g_c, nu, N) for l in range(N)))
+        # moving defs function inside here
+        results = pool.map(splat_h, ((l, y, x_mean, eta, s_v, hat_s_v, mu, phi, psi, lambda_i, D_x_g_c, nu, N) for l in range(N)))
         L = np.array(results).reshape(N,nu).transpose()
         
     return L
@@ -381,6 +384,59 @@ def gradient_expo(y):
     f = np.zeros((2,1))
     f = -(y-meann)*exp(-0.5*np.transpose(y-meann).dot(y-meann))
     return f
+
+# KZ: moving parallel KDE and ISDE here
+def splat_f(args):
+    return f(*args)
+
+def kernel(x, y, epsilon):
+    """
+    >>> kernel(np.array([1,0]), np.array([1,0]), 0.5)
+    1.0
+    """
+    dist = np.linalg.norm(x-y)**2
+    k = np.exp(-dist/(4*epsilon))
+    return k
+
+def f(i,j,eta,epsilon):
+    if j != i:
+        K = kernel((eta[:,i]),((eta[:,j])), epsilon)
+    else:
+        K = 1
+    return K
+
+def splat_h(args):
+    return h(*args)
+
+def h(l, y, x_mean, eta, s_v, hat_s_v, mu, phi, psi, lambda_i, D_x_g_c, nu, N):
+    yl = np.resize(y[:,l],(len(y[:,l]),1))
+    rho_ = rhoctypes(yl, np.resize(np.transpose(eta),(nu*N,1)),\
+             nu, N, s_v, hat_s_v)
+    rho_ = 1e250*rho_
+    # compute the D_x_g_c if D_x_g_c is not 0 (KZ)
+    if D_x_g_c:
+        grad_g_c = D_x_g_c(x_mean+np.resize(phi.dot(np.diag(mu)).dot(yl), (x_mean.shape)))
+    else:
+        # not constraints and no D_x_g_c
+        grad_g_c = np.zeros((x_mean.shape[0],1))
+    if rho_ < 1e-250:
+        closest = np.inf
+        for i in range(0,N):
+            if closest > np.linalg.norm((hat_s_v/s_v)*np.resize(eta[:,i],yl.shape)-yl):
+                closest = np.linalg.norm((hat_s_v/s_v)*np.resize(eta[:,i],yl.shape)-yl)
+                vector = (hat_s_v/s_v)*np.resize(eta[:,i],yl.shape)-yl
+        L = (  np.resize(vector/(hat_s_v**2),(nu))\
+            -np.resize(np.diag(mu).dot(np.transpose(phi)).\
+            dot(grad_g_c).dot(psi).dot(lambda_i), (nu)))
+
+    else:
+        array_pointer = cast(gradient_rhoctypes(np.zeros((nu,1)),yl,\
+            np.resize(np.transpose(eta),(nu*N,1)), nu, N, s_v, hat_s_v), POINTER(c_double*nu))
+        gradient_rho = np.frombuffer(array_pointer.contents)
+        L = np.resize(1e250*gradient_rho/rho_,(nu))\
+            -np.resize(np.diag(mu).dot(np.transpose(phi)).\
+            dot(grad_g_c).dot(psi).dot(lambda_i), (nu))
+    return L
 
 if __name__ == "__main__":
     import doctest
