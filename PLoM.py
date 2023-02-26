@@ -438,7 +438,7 @@ class PLoM:
             self.logfile.write_msg(msg='PLoM.config_tasks: the following tasks is configured to run: {}.'.format('->'.join(self.cur_task_list)),msg_type='RUNNING',msg_level=0)
         
 
-    def RunAlgorithm(self, n_mc = 5, epsilon_pca = 1e-6, epsilon_kde = 25, tol_PCA2 = 1e-5, tol = 1e-6, max_iter = 50, plot_tag = False, runDiffMaps = None, seed_num=None, parallel_mode=False):
+    def RunAlgorithm(self, n_mc = 5, epsilon_pca = 1e-6, epsilon_kde = 25, tol_PCA2 = 1e-5, tol = 1e-6, max_iter = 50, plot_tag = False, runDiffMaps = None, seed_num=None, parallel_mode=False, beta = 0.1):
         """
         Running the PLoM algorithm to train the model and generate new realizations
         - n_mc: realization/sample size ratio
@@ -491,7 +491,7 @@ class PLoM:
                 if runDiffMaps:
                     self.__getattribute__('task_'+cur_task.task_name).avail_var_list = []
                     #diff maps
-                    self.g, self.m, self.a, self.Z = self.DiffMaps(self.H, self.K, self.b)
+                    self.g, self.m, self.a, self.Z = self.DiffMaps(self.H, self.K, self.b, beta=beta)
                     self.logfile.write_msg(msg='PLoM.RunAlgorithm: diffusion maps completed.',msg_type='RUNNING',msg_level=0)
                     self.dbserver.add_item(item_name = 'KDE_g', item = self.g, data_shape=self.g.shape)
                     self.dbserver.add_item(item_name = 'KDE_m', item = np.array([self.m]))
@@ -578,13 +578,13 @@ class PLoM:
         return s_v, c_v, hat_s_v, K, b 
 
 
-    def DiffMaps(self, H, K, b):
+    def DiffMaps(self, H, K, b, beta=0.1):
         #..diff maps basis...
         #self.Z = PCA(self.H)
         try:
             g, eigenvalues = plom.g(K, b) #diffusion maps
             g = g.real
-            m = plom.m(eigenvalues)
+            m = plom.m(eigenvalues, beta=beta)
             a = g[:,0:m].dot(np.linalg.inv(np.transpose(g[:,0:m]).dot(g[:,0:m])))
             Z = H.dot(a)
             if self.plot_tag:
