@@ -42,11 +42,13 @@ class PLoM:
                 self.logfile.write_msg(msg='PLoM: constraints input failed.',msg_type='ERROR',msg_level=0)
         # KZ: add a parallel tag (default is False)
         self.parallel_tag = False
+        # KZ: diffusion map basis
+        self.diff_beta = 0.1
         # run
         if run_tag:
             self.logfile.write_msg(msg='PLoM: Running all steps to generate new samples.',msg_type='RUNNING',msg_level=0)
             self.ConfigTasks()
-            self.RunAlgorithm(n_mc = num_rlz, epsilon_pca = tol_pca, epsilon_kde = epsilon_kde, tol_PCA2 = tol_PCA2, tol = tol, max_iter = max_iter, plot_tag = plot_tag, runDiffMaps = self.runDiffMaps, parallel_mode = self.parallel_tag)
+            self.RunAlgorithm(n_mc = num_rlz, epsilon_pca = tol_pca, epsilon_kde = epsilon_kde, tol_PCA2 = tol_PCA2, tol = tol, max_iter = max_iter, plot_tag = plot_tag, runDiffMaps = self.runDiffMaps, parallel_mode = self.parallel_tag, beta=self.diff_beta)
         else:
             self.logfile.write_msg(msg='PLoM: using ConfigTasks(task_list = FULL_TASK_LIST) to schedule a run.',msg_type='RUNNING',msg_level=0)
             self.logfile.write_msg(msg='PLoM: using RunAlgorithm(n_mc=n_mc,epsilon_pca=epsilon_pca,epsilon_kde) to run simulations.',msg_type='RUNNING',msg_level=0)
