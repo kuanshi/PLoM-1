@@ -40,11 +40,13 @@ class PLoM:
         if not self.constraints: 
             if self.add_constraints(constraints_file=constraints):
                 self.logfile.write_msg(msg='PLoM: constraints input failed.',msg_type='ERROR',msg_level=0)
+        # KZ: add a parallel tag (default is False)
+        self.parallel_tag = False
         # run
         if run_tag:
             self.logfile.write_msg(msg='PLoM: Running all steps to generate new samples.',msg_type='RUNNING',msg_level=0)
             self.ConfigTasks()
-            self.RunAlgorithm(n_mc = num_rlz, epsilon_pca = tol_pca, epsilon_kde = epsilon_kde, tol_PCA2 = tol_PCA2, tol = tol, max_iter = max_iter, plot_tag = plot_tag, runDiffMaps = self.runDiffMaps)
+            self.RunAlgorithm(n_mc = num_rlz, epsilon_pca = tol_pca, epsilon_kde = epsilon_kde, tol_PCA2 = tol_PCA2, tol = tol, max_iter = max_iter, plot_tag = plot_tag, runDiffMaps = self.runDiffMaps, parallel_mode = self.parallel_tag)
         else:
             self.logfile.write_msg(msg='PLoM: using ConfigTasks(task_list = FULL_TASK_LIST) to schedule a run.',msg_type='RUNNING',msg_level=0)
             self.logfile.write_msg(msg='PLoM: using RunAlgorithm(n_mc=n_mc,epsilon_pca=epsilon_pca,epsilon_kde) to run simulations.',msg_type='RUNNING',msg_level=0)
@@ -436,7 +438,7 @@ class PLoM:
             self.logfile.write_msg(msg='PLoM.config_tasks: the following tasks is configured to run: {}.'.format('->'.join(self.cur_task_list)),msg_type='RUNNING',msg_level=0)
         
 
-    def RunAlgorithm(self, n_mc = 5, epsilon_pca = 1e-6, epsilon_kde = 25, tol_PCA2 = 1e-5, tol = 1e-6, max_iter = 50, plot_tag = False, runDiffMaps = None, seed_num=None):
+    def RunAlgorithm(self, n_mc = 5, epsilon_pca = 1e-6, epsilon_kde = 25, tol_PCA2 = 1e-5, tol = 1e-6, max_iter = 50, plot_tag = False, runDiffMaps = None, seed_num=None, parallel_mode=False):
         """
         Running the PLoM algorithm to train the model and generate new realizations
         - n_mc: realization/sample size ratio
@@ -477,7 +479,7 @@ class PLoM:
             elif cur_task.task_name == 'RunKDE':
                 self.__getattribute__('task_'+cur_task.task_name).avail_var_list = []
                 #parameters KDE
-                self.s_v, self.c_v, self.hat_s_v, self.K, self.b = self.RunKDE(self.H, epsilon_kde)
+                self.s_v, self.c_v, self.hat_s_v, self.K, self.b = self.RunKDE(self.H, epsilon_kde, parallel_mode=parallel_mode)
                 self.logfile.write_msg(msg='PLoM.RunAlgorithm: kernel density estimation completed.',msg_type='RUNNING',msg_level=0)
                 self.dbserver.add_item(item_name = 's_v', item = np.array([self.s_v]))
                 self.dbserver.add_item(item_name = 'c_v', item = np.array([self.c_v]))
@@ -510,7 +512,7 @@ class PLoM:
             elif cur_task.task_name == 'ISDEGeneration':
                 self.__getattribute__('task_'+cur_task.task_name).avail_var_list = []
                 #ISDE generation
-                self.ISDEGeneration(n_mc = n_mc, tol_PCA2 = tol_PCA2, tol = tol, max_iter = max_iter, seed_num=seed_num)
+                self.ISDEGeneration(n_mc = n_mc, tol_PCA2 = tol_PCA2, tol = tol, max_iter = max_iter, seed_num=seed_num, parallel_mode=parallel_mode)
                 self.logfile.write_msg(msg='PLoM.RunAlgorithm: Realizations generated.',msg_type='RUNNING',msg_level=0)
                 self.dbserver.add_item(item_name = 'X_new', col_names = list(self.X0.columns), item = self.Xnew.T, data_shape=self.Xnew.shape)
                 self.logfile.write_msg(msg='PLoM.RunAlgorithm: X_new saved.',msg_type='RUNNING',msg_level=0)
@@ -564,14 +566,14 @@ class PLoM:
         return H, mu, phi, nu
 
 
-    def RunKDE(self, X, epsilon_kde):
+    def RunKDE(self, X, epsilon_kde, parallel_mode=False):
         """
         Running Kernel Density Estimation
         - X: the data matrix to be reduced
         - epsilon_kde: smoothing parameter in the kernel density estimation
         """
         (s_v, c_v, hat_s_v) = plom.parameters_kde(X)
-        K, b = plom.K(X, epsilon_kde)
+        K, b = plom.K(X, epsilon_kde, parallel_mode=parallel_mode)
         
         return s_v, c_v, hat_s_v, K, b 
 
@@ -603,7 +605,7 @@ class PLoM:
         return g, m, a, Z
 
 
-    def ISDEGeneration(self, n_mc = 5, tol_PCA2 = 1e-5, tol = 0.02, max_iter = 50, seed_num=None):
+    def ISDEGeneration(self, n_mc = 5, tol_PCA2 = 1e-5, tol = 0.02, max_iter = 50, seed_num=None, parallel_mode=False):
         """
         The construction of a nonlinear Ito Stochastic Differential Equation (ISDE) to generate realizations of random variable H
         """
@@ -641,7 +643,7 @@ class PLoM:
                                             n_mc, self.x_mean, self.H, self.s_v,\
                                             self.hat_s_v, self.mu, self.phi,\
                                             self.g[:,0:self.m],  psi=self.psi,\
-                                            lambda_i=self.lambda_i, g_c=self.g_c, D_x_g_c = self.D_x_g_c) #solve the ISDE in n_mc iterations
+                                            lambda_i=self.lambda_i, g_c=self.g_c, D_x_g_c = self.D_x_g_c, parallel_mode=parallel_mode) #solve the ISDE in n_mc iterations
 
                 self.gradient = plom.gradient_gamma(self.b_c, Hnewvalues, self.g_c, self.phi, self.mu, self.psi, self.x_mean)
                 self.hessian = plom.hessian_gamma(Hnewvalues, self.psi, self.g_c, self.phi, self.mu, self.x_mean)
@@ -673,7 +675,7 @@ class PLoM:
             Hnewvalues, nu_lambda, x_, x_2 = plom.generator(self.Z, self.Y, self.a,\
                                         n_mc, self.x_mean, self.H, self.s_v,\
                                         self.hat_s_v, self.mu, self.phi,\
-                                        self.g[:,0:self.m],seed_num=seed_num) #solve the ISDE in n_mc iterations
+                                        self.g[:,0:self.m],seed_num=seed_num, parallel_mode=parallel_mode) #solve the ISDE in n_mc iterations
             self.logfile.write_msg(msg='PLoM.ISDEGeneration: new generations are simulated.',msg_type='RUNNING',msg_level=0)
             self.dbserver.add_item(item_name = 'Errors', item = np.array([0]))
 

@@ -64,7 +64,7 @@ def kernel(x, y, epsilon):
     k = np.exp(-dist/(4*epsilon))
     return k
 
-def K(eta, epsilon):
+def K(eta, epsilon, parallel_mode=False):
     """
     >>> K((np.array([[1,1],[1,1]])), 3)
     (array([[1., 1.],
@@ -73,15 +73,32 @@ def K(eta, epsilon):
     """
     # use parallel process for KDE
     # variable number of works
-    import multiprocessing
-    num_cpu = multiprocessing.cpu_count()
-    pool = Pool(num_cpu)
-    N = eta.shape[1]
-    # use functions in defs.py
-    # KZ: moving defs function inside here
-    results = pool.map(splat_f, ((i, j, eta, epsilon) for i in range(N) for j in range(N)))
-    K = np.array(results).reshape(N, N)
-    b = np.diag(np.sum(K,1))
+    # KZ: add parallel option here
+    if parallel_mode:
+        import multiprocessing
+        num_cpu = multiprocessing.cpu_count()
+        pool = Pool(num_cpu)
+        N = eta.shape[1]
+        # use functions in defs.py
+        # KZ: moving defs function inside here
+        results = pool.map(splat_f, ((i, j, eta, epsilon) for i in range(N) for j in range(N)))
+        K = np.array(results).reshape(N, N)
+        b = np.diag(np.sum(K,1))
+    else:
+        N = eta.shape[1]
+        K = np.zeros((N,N))
+        b = np.zeros((N,N))
+        for i in range(0,N):
+            row_sum = 0
+            for j in range(0,N):
+                if j != i:
+                    K[i,j] = kernel((eta[:,i]),((eta[:,j])), epsilon)
+                    row_sum = row_sum + K[i,j]
+                else:
+                    K[i,j] = 1
+                    row_sum = row_sum + 1
+            b[i,i] = row_sum
+
     return K, b
 
 def g(K, b):
@@ -251,7 +268,7 @@ def solve_inverse(matrix):
         return inverse
 
 
-def generator(z_init, y_init, a, n_mc, x_mean, eta, s_v, hat_s_v, mu, phi, g, psi = 0, lambda_i = 0, g_c = 0, D_x_g_c = 0, seed_num=None):
+def generator(z_init, y_init, a, n_mc, x_mean, eta, s_v, hat_s_v, mu, phi, g, psi = 0, lambda_i = 0, g_c = 0, D_x_g_c = 0, seed_num=None, parallel_mode=False):
     if seed_num:
         np.random.seed(seed_num)
     delta_t = 2*pi*hat_s_v/20
@@ -274,14 +291,14 @@ def generator(z_init, y_init, a, n_mc, x_mean, eta, s_v, hat_s_v, mu, phi, g, ps
     for i in range (0,l_0):
         z_l_half = z_l + delta_t*0.5*y_l
         w_l_1 = np.random.normal(scale = sqrt(delta_t), size = (nu,N)).dot(a) #wiener process
-        L_l_half = L(z_l_half.dot(np.transpose(g)), g_c, x_mean, eta, s_v, hat_s_v, mu, phi, psi, lambda_i, D_x_g_c).dot(a)
+        L_l_half = L(z_l_half.dot(np.transpose(g)), g_c, x_mean, eta, s_v, hat_s_v, mu, phi, psi, lambda_i, D_x_g_c, parallel_mode=parallel_mode).dot(a)
         y_l_1 = (1-beta)*y_l/(1+beta) + delta_t*(L_l_half)/(1+beta) + sqrt(f_0)*w_l_1/(1+beta)
         z_l = z_l_half + delta_t*0.5*y_l_1
         y_l = y_l_1
     for l in range(M_0, M_0*(n_mc+1)):
         z_l_half = z_l + delta_t*0.5*y_l
         w_l_1 = np.random.normal(scale = sqrt(delta_t), size = (nu,N)).dot(a) #wiener process
-        L_l_half = L(z_l_half.dot(np.transpose(g)), g_c, x_mean, eta, s_v, hat_s_v, mu, phi, psi, lambda_i, D_x_g_c).dot(a)
+        L_l_half = L(z_l_half.dot(np.transpose(g)), g_c, x_mean, eta, s_v, hat_s_v, mu, phi, psi, lambda_i, D_x_g_c, parallel_mode=parallel_mode).dot(a)
         y_l_1 = (1-beta)*y_l/(1+beta) + delta_t*(L_l_half)/(1+beta) + sqrt(f_0)*w_l_1/(1+beta)
         z_l = z_l_half + delta_t*0.5*y_l_1
         y_l = y_l_1
@@ -297,12 +314,12 @@ def ac(sig):
     sft = np.fft.rfft( np.concatenate((sig,0*sig)) )
     return np.fft.irfft(np.conj(sft)*sft)
 
-def L(y, g_c, x_mean, eta, s_v, hat_s_v, mu, phi, psi, lambda_i, D_x_g_c): #gradient of the potential
+def L(y, g_c, x_mean, eta, s_v, hat_s_v, mu, phi, psi, lambda_i, D_x_g_c, parallel_mode=False): #gradient of the potential
     nu = eta.shape[0]
     N = eta.shape[1]
     L = np.zeros((nu,N))
 
-    if False:
+    if parallel_mode is False:
         for l in range(0,N):
             yl = np.resize(y[:,l],(len(y[:,l]),1))
             rho_ = rhoctypes(yl, np.resize(np.transpose(eta),(nu*N,1)),\
@@ -339,7 +356,8 @@ def L(y, g_c, x_mean, eta, s_v, hat_s_v, mu, phi, psi, lambda_i, D_x_g_c): #grad
                 L[:,l] = np.resize(1e250*gradient_rho/rho_,(nu))\
                         -np.resize(np.diag(mu).dot(np.transpose(phi)).\
                                 dot(grad_g_c).dot(psi).dot(lambda_i), (nu))
-    if True:
+    #if True:
+    else:
         import multiprocessing
         num_cpu = multiprocessing.cpu_count()
         pool = Pool(num_cpu)
@@ -388,15 +406,6 @@ def gradient_expo(y):
 # KZ: moving parallel KDE and ISDE here
 def splat_f(args):
     return f(*args)
-
-def kernel(x, y, epsilon):
-    """
-    >>> kernel(np.array([1,0]), np.array([1,0]), 0.5)
-    1.0
-    """
-    dist = np.linalg.norm(x-y)**2
-    k = np.exp(-dist/(4*epsilon))
-    return k
 
 def f(i,j,eta,epsilon):
     if j != i:
